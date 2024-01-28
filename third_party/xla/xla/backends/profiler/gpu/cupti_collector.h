@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ limitations under the License.
 #include "absl/container/fixed_array.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/node_hash_set.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "tsl/platform/macros.h"
 #include "tsl/platform/status.h"
@@ -251,7 +252,8 @@ class AnnotationMap {
   const tsl::uint64 max_size_;
   absl::FixedArray<PerDeviceAnnotationMap> per_device_map_;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(AnnotationMap);
+  AnnotationMap(const AnnotationMap&) = delete;
+  void operator=(const AnnotationMap&) = delete;
 };
 
 class CuptiTraceCollector {
@@ -282,7 +284,8 @@ class CuptiTraceCollector {
  private:
   AnnotationMap annotation_map_;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(CuptiTraceCollector);
+  CuptiTraceCollector(const CuptiTraceCollector&) = delete;
+  void operator=(const CuptiTraceCollector&) = delete;
 };
 
 std::unique_ptr<CuptiTraceCollector> CreateCuptiCollector(

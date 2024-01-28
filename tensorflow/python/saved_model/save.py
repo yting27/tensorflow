@@ -1377,7 +1377,8 @@ def save_and_return_nodes(
   if not experimental_skip_checkpoint:
     path_helpers.get_or_create_variables_dir(export_dir)
     ckpt_options = checkpoint_options.CheckpointOptions(
-        experimental_io_device=options.experimental_io_device)
+        experimental_io_device=options.experimental_io_device,
+        experimental_sharding_callback=options.experimental_sharding_callback)
     object_saver.save(
         path_helpers.get_variables_path(export_dir), options=ckpt_options)
   builder_impl.copy_assets_to_destination_dir(asset_info.asset_filename_map,
@@ -1410,7 +1411,7 @@ def save_and_return_nodes(
         compat.as_str(constants.SAVED_MODEL_FILENAME_PB))
     file_io.atomic_write_string_to_file(
         path, saved_model.SerializeToString(deterministic=True))
-    fingerprinting_utils.write_fingerprint(export_dir)
+  fingerprinting_utils.write_fingerprint(export_dir)
 
   # Save debug info, if requested.
   if options.save_debug_info:

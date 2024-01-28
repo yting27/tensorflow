@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -606,7 +606,8 @@ class CuptiTraceCollectorImpl : public CuptiTraceCollector {
 
   absl::FixedArray<PerDeviceCollector> per_device_collector_;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(CuptiTraceCollectorImpl);
+  CuptiTraceCollectorImpl(const CuptiTraceCollectorImpl&) = delete;
+  void operator=(const CuptiTraceCollectorImpl&) = delete;
 };
 
 std::unique_ptr<CuptiTraceCollector> CreateCuptiCollector(

@@ -1,12 +1,12 @@
 # Description:
 # StreamExecutor C API.
 
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
 )
 load("//tensorflow:tensorflow.default.bzl", "filegroup")
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -64,7 +64,9 @@ cc_library(
         "//tensorflow/c:c_api_macros",
         "//tensorflow/c:tf_status",
         "//tensorflow/c:tf_status_helper",
+        "@local_tsl//tsl/platform:statusor",
         "@local_xla//xla/stream_executor",
+        "@local_xla//xla/stream_executor:stream_executor_internal",
     ],
 )
 

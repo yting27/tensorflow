@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2019 The OpenXLA Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 Build dependencies and utilities for the TPU driver interface.
 """
 
-def go_grpc_library(**kwargs):
+def go_grpc_library(**_kwargs):
     # A dummy macro placeholder for compatibility reason.
     pass
 

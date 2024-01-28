@@ -6,13 +6,7 @@ load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
-    default_visibility = [
-        # TODO(jpienaar): Make the visibility more restrictive.
-        ":friends",
-        "//learning/brain/mobile/programmability:__subpackages__",
-        "//tensorflow/lite/experimental/tf_runtime:__subpackages__",
-        "//tensorflow/lite/testing:__subpackages__",
-    ],
+    default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
 
@@ -318,9 +312,24 @@ cc_library(
     ],
 )
 
+gentbl_cc_library(
+    name = "tensorflow_lite_canonicalize_inc_gen",
+    compatible_with = get_compatible_with_portable(),
+    tbl_outs = [
+        (
+            ["-gen-rewriters"],
+            "ir/tfl_canonicalize.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "ir/tfl_canonicalize.td",
+    deps = [":tensorflow_lite_patterns_td_files"],
+)
+
 cc_library(
     name = "tensorflow_lite",
     srcs = [
+        "ir/tfl_canonicalize.inc",
         "ir/tfl_ops.cc",
         "ir/tfl_ops.cc.inc",
         "ir/tfl_ops.h.inc",
@@ -342,8 +351,10 @@ cc_library(
         "@llvm-project//mlir:include/mlir/Transforms/InliningUtils.h",
     ],
     deps = [
+        ":converter_inc",
         ":cost_estimators",
         ":size_utils",
+        ":tensorflow_lite_canonicalize_inc_gen",
         ":tensorflow_lite_op_enums_inc_gen",
         ":tensorflow_lite_op_interfaces_inc_gen",
         ":tensorflow_lite_ops_inc_gen",
@@ -359,6 +370,7 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
         "//tensorflow/core:framework",
         "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@eigen_archive//:eigen3",
@@ -873,8 +885,8 @@ cc_library(
         "transforms/lift_tflite_flex_ops.h",
     ],
     deps = [
+        ":tensorflow_lite",
         ":tensorflow_lite_passes_inc_gen",
-        "//tensorflow/compiler/mlir/lite:tensorflow_lite",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:convert_attr",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_attributes",
@@ -883,6 +895,7 @@ cc_library(
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
+        "@com_google_absl//absl/strings",
         "@flatbuffers",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
@@ -1094,9 +1107,9 @@ cc_library(
         "flatbuffer_import.h",
     ],
     deps = [
+        ":const_tensor_utils",
         ":convert_type",
         ":flatbuffer_tflite_operator_lib",
-        ":low_bit_utils",
         ":offset_buffer",
         ":size_utils",
         ":tensorflow_lite",
@@ -1112,16 +1125,14 @@ cc_library(
         "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:status",
         "//tensorflow/lite:framework",
-        "//tensorflow/lite:string_util",
         "//tensorflow/lite/experimental/remat:metadata_util",
         "//tensorflow/lite/schema:schema_fbs_with_mutable",
         "//tensorflow/lite/schema:schema_utils",
-        "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-        "@eigen_archive//:eigen3",
+        "@llvm-project//llvm:Analysis",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:FuncDialect",
@@ -1130,7 +1141,8 @@ cc_library(
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TranslateLib",
-        "@local_xla//xla:statusor",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/platform:statusor",
         "@stablehlo//:stablehlo_ops",
     ],
 )
@@ -1177,7 +1189,7 @@ cc_library(
 )
 
 cc_library(
-    name = "flatbuffer_translate_registeration",
+    name = "flatbuffer_translate_registration",
     srcs = [
         "flatbuffer_translate.cc",
     ],
@@ -1203,7 +1215,7 @@ cc_library(
 tf_cc_binary(
     name = "flatbuffer_translate",
     deps = [
-        ":flatbuffer_translate_registeration",
+        ":flatbuffer_translate_registration",
     ],
 )
 
@@ -1248,7 +1260,7 @@ tf_cc_binary(
     deps = [
         ":common",
         ":flatbuffer_translate_lib",
-        ":flatbuffer_translate_registeration",
+        ":flatbuffer_translate_registration",
         ":tensorflow_lite",
         ":tf_tfl_passes",
         ":tf_tfl_translate_cl_options",
@@ -1259,6 +1271,7 @@ tf_cc_binary(
         "//tensorflow/compiler/mlir/tensorflow:mlir_roundtrip_flags",
         "//tensorflow/compiler/mlir/tensorflow:translate_cl_options",
         "//tensorflow/compiler/mlir/tensorflow/transforms:tensorflow_passes",
+        "//tensorflow/compiler/tf2xla/kernels:xla_ops",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/platform:errors",
         "//tensorflow/lite:framework",
@@ -1284,7 +1297,7 @@ tf_cc_binary(
     ],
     deps = [
         ":flatbuffer_translate_lib",
-        ":flatbuffer_translate_registeration",
+        ":flatbuffer_translate_registration",
         ":tensorflow_lite",
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/core:lib",
@@ -1311,18 +1324,18 @@ cc_library(
         ":common",
         ":fake_quant_utils",
         ":tensorflow_lite_d2s",
-        ":tensorflow_lite_legalize_tf",
-        ":tensorflow_lite_optimize",
-        ":tensorflow_lite_optimize_batch_matmul",
-        ":tensorflow_lite_quantize",
+        ":tensorflow_lite_legalize_tf",  # buildcleaner: keep
+        ":tensorflow_lite_optimize",  # buildcleaner: keep
+        ":tensorflow_lite_optimize_batch_matmul",  # buildcleaner: keep
+        ":tensorflow_lite_quantize",  # buildcleaner: keep
         "//tensorflow/compiler/mlir/lite/quantization:quantization_config",
         "//tensorflow/compiler/mlir/lite/quantization:quantization_passes",
         "//tensorflow/compiler/mlir/lite/quantization/tensorflow:tf_quantization_passes",
         "//tensorflow/compiler/mlir/lite/stablehlo:compose_uniform_quantized_type_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:legalize_tf_xla_call_module_to_stablehlo_pass",
         "//tensorflow/compiler/mlir/lite/stablehlo:rename_entrypoint_to_main",
-        "//tensorflow/compiler/mlir/lite/stablehlo:tf_legalize_hlo",
-        "//tensorflow/compiler/mlir/lite/stablehlo:tfl_legalize_hlo",
+        "//tensorflow/compiler/mlir/lite/stablehlo:tf_legalize_hlo",  # buildcleaner: keep
+        "//tensorflow/compiler/mlir/lite/stablehlo:tfl_legalize_hlo",  # buildcleaner: keep
         "//tensorflow/compiler/mlir/lite/stablehlo:transforms",
         "//tensorflow/compiler/mlir/lite/stablehlo:uniform_quantized_stablehlo_to_tfl_pass",
         "//tensorflow/compiler/mlir/tensorflow",
@@ -1419,6 +1432,31 @@ cc_library(
 cc_library(
     name = "offset_buffer",
     hdrs = ["offset_buffer.h"],
+)
+
+cc_library(
+    name = "const_tensor_utils",
+    srcs = ["utils/const_tensor_utils.cc"],
+    hdrs = ["utils/const_tensor_utils.h"],
+    deps = [
+        ":convert_type",
+        ":low_bit_utils",
+        "//tensorflow/compiler/mlir/tensorflow:dynamic_shape_utils",
+        "//tensorflow/compiler/mlir/tensorflow:tensorflow_types",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/lite:string_util",
+        "//tensorflow/lite/schema:schema_fbs",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@eigen_archive//:eigen3",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:QuantOps",
+        "@llvm-project//mlir:Support",
+        "@local_tsl//tsl/platform:statusor",
+    ],
 )
 
 tf_cc_test(

@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,6 +43,41 @@ TEST_F(FusionWrapperTest, SimpleOp) {
 // CHECK:   %p0 = f16[30,41]{1,0} parameter(0)
 // CHECK:   %p1 = f16[30,41]{1,0} parameter(1)
 // CHECK:   ROOT %wrapped_result = f16[60,41]{1,0} fusion(%p0, %p1), kind=kLoop, calls=%fused_computation
+// CHECK: })");
+}
+
+TEST_F(FusionWrapperTest, Scatter) {
+  RunAndFilecheckHloRewrite(R"(
+      HloModule ScatterIntoScalar
+
+      update_s32 {
+        lhs = s32[] parameter(0)
+        ROOT rhs = s32[] parameter(1)
+      }
+
+      ENTRY main {
+        parameter.1 = s32[] parameter(0)
+        parameter.2 = s32[0]{0} parameter(1)
+        parameter.3 = s32[] parameter(2)
+        ROOT scatter_ScatterIntoScalar = s32[] scatter(parameter.1, parameter.2, parameter.3),
+            update_window_dims={},
+            inserted_window_dims={},
+            scatter_dims_to_operand_dims={},
+            index_vector_dim=0,
+            to_apply=update_s32
+      })",
+                            FusionWrapper(), R"(
+// CHECK: fused_computation
+// CHECK:   %[[param_0:.*]] = s32[] parameter(0)
+// CHECK:   %[[param_1:.*]] = s32[0]{0} parameter(1)
+// CHECK:   %[[param_2:.*]] = s32[] parameter(2)
+// CHECK:   ROOT %{{.*}} = s32[] scatter(%[[param_0]], %[[param_1]], %[[param_2]])
+
+// CHECK: ENTRY
+// CHECK:   %[[p0:.*]] = s32[] parameter(0)
+// CHECK:   %[[p1:.*]] = s32[0]{0} parameter(1)
+// CHECK:   %[[p2:.*]] = s32[] parameter(2)
+// CHECK:   ROOT %{{.*}} = s32[] fusion(%[[p0]], %[[p1]], %[[p2]]), kind=kInput, calls=%fused_computation
 // CHECK: })");
 }
 

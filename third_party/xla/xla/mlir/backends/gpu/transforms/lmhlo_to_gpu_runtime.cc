@@ -1,4 +1,4 @@
-/* Copyright 2022 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2022 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -791,6 +791,18 @@ class CollectiveOpLowering : public OpRewritePattern<CollectiveOp> {
     return op.getIsSync();
   }
 
+  template <typename OpT>
+  static typename std::enable_if_t<is_any<OpT, SendOp, RecvOp>, bool>
+  noParallelCustomCall(OpT) {
+    return false;
+  }
+
+  template <typename OpT>
+  static typename std::enable_if_t<!is_any<OpT, SendOp, RecvOp>, bool>
+  noParallelCustomCall(OpT op) {
+    return op.getNoParallelCustomCall();
+  }
+
   // For async collective erase all corresponding done operations.
   template <typename StartOpT, typename DoneOpT>
   void eraseDoneOp(PatternRewriter& rewriter, CollectiveOp op) const {
@@ -912,6 +924,9 @@ class CollectiveOpLowering : public OpRewritePattern<CollectiveOp> {
 
     bool is_async = !getIsSync(op);
     call->setAttr(b.getStringAttr("is_async"), b.getBoolAttr(is_async));
+
+    call->setAttr(b.getStringAttr("no_parallel_custom_call"),
+                  b.getBoolAttr(noParallelCustomCall(op)));
 
     // If the collective will not execute asynchronously, erase the associated
     // done op.

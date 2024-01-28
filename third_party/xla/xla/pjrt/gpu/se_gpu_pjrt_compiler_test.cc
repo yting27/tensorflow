@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2023 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include "absl/status/status.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Parser/Parser.h"  // from @llvm-project
@@ -27,8 +28,10 @@ limitations under the License.
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_compiler.h"
 #include "xla/service/hlo_parser.h"
+#include "xla/test.h"
 #include "xla/tests/literal_test_util.h"
 #include "tsl/platform/status_matchers.h"
+#include "tsl/platform/statusor.h"
 
 namespace xla {
 namespace {
@@ -57,14 +60,24 @@ absl::StatusOr<xla::XlaComputation> GetXlaComputation(
   return XlaComputation(hlo_module->ToProto());
 }
 
+TEST(StreamExecutorGpuCompilerTest, NoClientXla) {
+  StreamExecutorGpuCompiler compiler;
+  StreamExecutorGpuTopologyDescription topology(CudaId(), CudaName(),
+                                                "Fake_device", {0, 1});
+
+  TF_ASSERT_OK_AND_ASSIGN(auto computation, GetXlaComputation(kProgram));
+  EXPECT_THAT(compiler.Compile(xla::CompileOptions(), computation, topology,
+                               /*client=*/nullptr),
+              StatusIs(absl::StatusCode::kUnimplemented));
+}
+
 TEST(StreamExecutorGpuCompilerTest, TopologyNotSameXla) {
   StreamExecutorGpuCompiler compiler;
   StreamExecutorGpuTopologyDescription topology(CudaId(), CudaName(),
                                                 "Fake_device", {0, 1});
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto client, GetStreamExecutorGpuClient(true, /*allocator_config=*/{},
-                                              /*node_id=*/0));
+  TF_ASSERT_OK_AND_ASSIGN(auto client,
+                          GetStreamExecutorGpuClient(GpuClientOptions()));
   TF_ASSERT_OK_AND_ASSIGN(auto computation, GetXlaComputation(kProgram));
   EXPECT_THAT(compiler.Compile(xla::CompileOptions(), computation, topology,
                                client.get()),
@@ -74,9 +87,8 @@ TEST(StreamExecutorGpuCompilerTest, TopologyNotSameXla) {
 TEST(StreamExecutorGpuCompilerTest, SuccessXla) {
   StreamExecutorGpuCompiler compiler;
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto client, GetStreamExecutorGpuClient(true, /*allocator_config=*/{},
-                                              /*node_id=*/0));
+  TF_ASSERT_OK_AND_ASSIGN(auto client,
+                          GetStreamExecutorGpuClient(GpuClientOptions()));
   TF_ASSERT_OK_AND_ASSIGN(auto computation, GetXlaComputation(kProgram));
   TF_ASSERT_OK_AND_ASSIGN(auto topology, client->GetTopologyDescription());
   TF_ASSERT_OK_AND_ASSIGN(auto executable,
@@ -128,9 +140,8 @@ TEST(StreamExecutorGpuCompilerTest, TopologyNotSameMlir) {
   StreamExecutorGpuTopologyDescription topology(CudaId(), CudaName(),
                                                 "Fake_device", {0, 1});
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto client, GetStreamExecutorGpuClient(true, /*allocator_config=*/{},
-                                              /*node_id=*/0));
+  TF_ASSERT_OK_AND_ASSIGN(auto client,
+                          GetStreamExecutorGpuClient(GpuClientOptions()));
   EXPECT_THAT(compiler.Compile(xla::CompileOptions(), mlir_module.get(),
                                topology, client.get()),
               StatusIs(absl::StatusCode::kUnimplemented));
@@ -145,9 +156,8 @@ TEST(StreamExecutorGpuCompilerTest, SuccessMlir) {
   auto mlir_module =
       mlir::parseSourceString<mlir::ModuleOp>(mlir_str, &context);
 
-  TF_ASSERT_OK_AND_ASSIGN(
-      auto client, GetStreamExecutorGpuClient(true, /*allocator_config=*/{},
-                                              /*node_id=*/0));
+  TF_ASSERT_OK_AND_ASSIGN(auto client,
+                          GetStreamExecutorGpuClient(GpuClientOptions()));
   TF_ASSERT_OK_AND_ASSIGN(auto topology, client->GetTopologyDescription());
   TF_ASSERT_OK_AND_ASSIGN(
       auto executable,

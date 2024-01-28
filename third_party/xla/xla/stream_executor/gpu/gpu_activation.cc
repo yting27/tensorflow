@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,12 +36,6 @@ ScopedActivateExecutorContext::ScopedActivateExecutorContext(
 
 ScopedActivateExecutorContext::~ScopedActivateExecutorContext() {
   delete static_cast<ScopedActivateContext*>(driver_scoped_activate_context_);
-}
-
-ScopedActivateExecutorContext::ScopedActivateExecutorContext(
-    ScopedActivateExecutorContext&& other)
-    : driver_scoped_activate_context_(other.driver_scoped_activate_context_) {
-  other.driver_scoped_activate_context_ = nullptr;
 }
 
 }  // namespace gpu

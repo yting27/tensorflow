@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -144,22 +144,6 @@ def HloLegalizeToLinalgPass : Pass<"hlo-legalize-to-linalg", "func::FuncOp"> {
                         /*default=*/"false",
                         "Lower to primitive Linalg ops (map, reduce and "
                         "transpose) when possible, instead of linalg.generic">];
-}
-
-def LegalizeMHLOToTHLOPass : Pass<"legalize-mhlo-to-thlo", "mlir::func::FuncOp"> {
-  let summary = "Legalize from HLO dialect to tHLO dialect.";
-  let constructor = "::mlir::mhlo::createLegalizeMHLOToTHLOPass()";
-  let options =
-      [Option<"enableExperimental", "enable-experimental", "bool",
-              /*default=*/"false",
-              "Enable conversion to operations that are still under "
-              "developement and might not be working in some pipelines. For "
-              "example, thlo.map and thlo.transpose.">];
-  let dependentDialects = [
-    "arith::ArithDialect", "complex::ComplexDialect",
-    "linalg::LinalgDialect", "math::MathDialect", "shape::ShapeDialect",
-    "tensor::TensorDialect", "thlo::THLODialect"
-  ];
 }
 
 def HloLegalizeShapeComputationsPass : Pass<"hlo-legalize-shape-computations", "func::FuncOp"> {
@@ -408,4 +392,8 @@ def ShapeLegalizeToHloPass : Pass<"shape-legalize-to-hlo", "func::FuncOp"> {
     compilation pipelines that use HLO operations to model dynamism.
   }];
   let dependentDialects = ["mhlo::MhloDialect"];
+  let options = [
+    Option<"legalize_constraints_", "legalize-constraints", "bool",
+           /*default=*/"false", "Whether to legalize Cstr Ops to shape_assertion custom_call">
+  ];
 }

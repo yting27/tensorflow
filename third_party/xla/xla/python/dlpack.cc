@@ -1,4 +1,4 @@
-/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,9 +15,11 @@ limitations under the License.
 
 #include "xla/python/dlpack.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -25,6 +27,7 @@ limitations under the License.
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
 #include "include/dlpack/dlpack.h"  // from @dlpack
+#include "pybind11/gil.h"  // from @pybind11
 #include "pybind11/pytypes.h"  // from @pybind11
 #include "xla/pjrt/pjrt_client.h"
 #include "xla/pjrt/pjrt_compiler.h"
@@ -34,6 +37,7 @@ limitations under the License.
 #include "xla/python/util.h"
 #include "xla/types.h"
 #include "xla/util.h"
+#include "tsl/platform/errors.h"
 
 namespace py = pybind11;
 
@@ -96,7 +100,7 @@ StatusOr<DLDataType> PrimitiveTypeToDLDataType(PrimitiveType type) {
     case BF16:
       return DLDataType{kDLBfloat, 16, 1};
     case PRED:
-      return DLDataType{kDLUInt, 8, 1};
+      return DLDataType{kDLBool, 8, 1};
     case C64:
       return DLDataType{kDLComplex, 64, 1};
     case C128:
@@ -113,6 +117,15 @@ StatusOr<PrimitiveType> DLDataTypeToPrimitiveType(DLDataType type) {
                          type.lanes);
   }
   switch (type.code) {
+    case kDLBool:
+      switch (type.bits) {
+        case 8:
+          return PRED;
+        default:
+          return Unimplemented(
+              "Only 8-bit DLPack booleans are supported, got %d bits",
+              type.bits);
+      }
     case kDLInt:
       switch (type.bits) {
         case 8:
@@ -263,8 +276,7 @@ StatusOr<PjRtDevice*> DeviceForDLDevice(const PjRtClient* cpu_client,
 }  // namespace
 
 StatusOr<py::capsule> BufferToDLPackManagedTensor(
-    py::handle py_buffer, bool take_ownership,
-    std::optional<std::intptr_t> stream) {
+    py::handle py_buffer, std::optional<std::intptr_t> stream) {
   ifrt::Array* ifrt_array = py::cast<xla::PyArray>(py_buffer).ifrt_array();
   auto pack = std::make_unique<DLPackTensor>();
   if (ifrt_array == nullptr) {
@@ -282,38 +294,21 @@ StatusOr<py::capsule> BufferToDLPackManagedTensor(
   }
 
   DLTensor& dt = pack->tensor.dl_tensor;
-  if (take_ownership) {
-    // Block on outstanding operations, so that it is safe to read or mutate the
-    // returned buffer.
-    StatusOr<std::unique_ptr<PjRtBuffer::ExternalReference>> buffer_or =
-        pjrt_buffer->ReleaseDeviceMemoryOwnership(
-            /*wait_for_operations_to_complete=*/true);
-    if (!buffer_or.ok()) {
-      return InvalidArgument(
-          "Buffer synchronization failed converting to DLPack tensor: %s",
-          buffer_or.status().ToString());
+  {
+    // AcquireExternalReference may block; there are no API guarantees.
+    GlobalPyRefManager()->CollectGarbage();
+    py::gil_scoped_release gil_release;
+    TF_ASSIGN_OR_RETURN(pack->external_reference,
+                        pjrt_buffer->AcquireExternalReference());
+    if (stream) {
+      TF_RETURN_IF_ERROR(
+          pack->external_reference->WaitUntilBufferReadyOnStream(*stream));
+    } else {
+      TF_RETURN_IF_ERROR(AwaitBuffersReady(ifrt_array));
     }
-    pack->external_reference = std::move(buffer_or).value();
-    if (!pack->external_reference) {
-      return InvalidArgument(
-          "Cannot convert deleted/invalid buffer to DLPack tensor.");
-    }
-  } else {
-    {
-      // AcquireExternalReference may block; there are no API guarantees.
-      GlobalPyRefManager()->CollectGarbage();
-      py::gil_scoped_release gil_release;
-      TF_ASSIGN_OR_RETURN(pack->external_reference,
-                          pjrt_buffer->AcquireExternalReference());
-      if (stream) {
-        TF_RETURN_IF_ERROR(
-            pack->external_reference->WaitUntilBufferReadyOnStream(*stream));
-      } else {
-        TF_RETURN_IF_ERROR(AwaitBuffersReady(ifrt_array));
-      }
-    }
-    pack->buffer_reference = py::reinterpret_borrow<py::object>(py_buffer);
   }
+  pack->buffer_reference = py::reinterpret_borrow<py::object>(py_buffer);
+
   dt.data = pack->external_reference->OpaqueDeviceMemoryDataPointer();
   pack->tensor.manager_ctx = pack.get();
   pack->tensor.deleter = DLPackTensorDeleter;
@@ -390,6 +385,21 @@ StatusOr<pybind11::object> DLPackManagedTensorToBuffer(
   }
   Shape shape = ShapeUtil::MakeShapeWithDenseLayout(element_type, dimensions,
                                                     minor_to_major);
+
+  // Raise an error if the resulting PjRtBuffer would have a non-default layout.
+  // TODO(skyewm): we do this because JAX doesn't currently have good support
+  // for non-default layouts, and will return wrong results if a non-default
+  // layout is passed to a computation expecting default layouts. Remove this
+  // special case when non-default layouts are better supported by JAX.
+  TF_ASSIGN_OR_RETURN(Layout default_layout, device->client()->GetDefaultLayout(
+                                                 element_type, dimensions));
+  if (shape.layout() != default_layout) {
+    return Unimplemented(
+        "from_dlpack got array with non-default layout with minor-to-major "
+        "dimensions (%s), expected (%s)",
+        absl::StrJoin(shape.layout().minor_to_major(), ","),
+        absl::StrJoin(default_layout.minor_to_major(), ","));
+  }
 
   std::function<void()> on_delete_callback;
   if (dlmt->deleter) {

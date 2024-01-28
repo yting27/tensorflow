@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -196,7 +196,8 @@ std::unique_ptr<OperationPass<ModuleOp>> createHloLegalizeToStablehloPass();
 std::unique_ptr<OperationPass<ModuleOp>> createStablehloLegalizeToHloPass();
 
 // Legalizes from the Shape dialect to the MHLO dialect.
-std::unique_ptr<OperationPass<func::FuncOp>> createShapeLegalizeToHloPass();
+std::unique_ptr<OperationPass<func::FuncOp>> createShapeLegalizeToHloPass(
+    bool legalizeConstraints = false);
 
 // Test passes.
 std::unique_ptr<Pass> createTestInferShapedTypeMethodsPass();

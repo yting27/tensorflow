@@ -72,7 +72,7 @@ tf_proto_library(
     cc_api_version = 2,
     make_default_target_header_only = True,
     protodeps = [
-        "@local_xla//xla/stream_executor:dnn_proto",
+        "@local_tsl//tsl/protobuf:dnn_proto",
     ],
 )
 
@@ -216,6 +216,7 @@ tf_proto_library(
         "@local_tsl//tsl/protobuf:status_proto",
     ],
     tags = ["alt_dep=//third_party/tensorflow/core:protos_all"],
+    visibility = ["//visibility:public"],
     exports = [
         "@local_tsl//tsl/protobuf:bfc_memory_map_proto",
         "@local_tsl//tsl/protobuf:rpc_options_proto",
@@ -235,7 +236,7 @@ tf_proto_library(
 # cc_grpc_library(
 #     name = "master_service_cc_grpc_proto",
 #     srcs = [":master_service_proto"],
-#     compatible_with = ["//buildenv/target:gce"],
+#     compatible_with = ["//buildenv/target:non_prod"],
 #     generate_mocks = True,
 #     service_namespace = "grpc_gen",
 #     deps = [":master_service_proto_cc"],

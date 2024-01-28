@@ -1,4 +1,4 @@
-/* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2019 The OpenXLA Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -1077,7 +1077,9 @@ class CuptiDriverApiHookWithActivityApi : public CuptiDriverApiHook {
   absl::Mutex mutex_;
   absl::flat_hash_set<CUcontext> contexts_ TF_GUARDED_BY(mutex_);
 
-  TF_DISALLOW_COPY_AND_ASSIGN(CuptiDriverApiHookWithActivityApi);
+  CuptiDriverApiHookWithActivityApi(const CuptiDriverApiHookWithActivityApi &) =
+      delete;
+  void operator=(const CuptiDriverApiHookWithActivityApi &) = delete;
 };
 
 struct KernelRecord {
@@ -1699,7 +1701,9 @@ class CuptiDriverApiHookWithCudaEvent : public CuptiDriverApiHook {
   CuptiTraceCollector *collector_;
   absl::node_hash_set<CuptiApiCallbackContext *> callback_contexts_;
   std::vector<std::unique_ptr<CudaEventRecorder>> cuda_event_recorders_;
-  TF_DISALLOW_COPY_AND_ASSIGN(CuptiDriverApiHookWithCudaEvent);
+  CuptiDriverApiHookWithCudaEvent(const CuptiDriverApiHookWithCudaEvent &) =
+      delete;
+  void operator=(const CuptiDriverApiHookWithCudaEvent &) = delete;
 };
 
 /*static*/ std::string ErrorWithHostname(absl::string_view error_message) {
