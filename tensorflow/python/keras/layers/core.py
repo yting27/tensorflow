@@ -1239,7 +1239,14 @@ class Dense(Layer):
         outputs = gen_math_ops.MatMul(a=inputs, b=self.kernel)
     # Broadcast kernel to inputs.
     else:
-      outputs = standard_ops.tensordot(inputs, self.kernel, [[rank - 1], [0]])
+      ## Added by yentingn
+      ## Fixed tflite "Shape" ops issue
+      # outputs = standard_ops.tensordot(inputs, self.kernel, [[rank - 1], [0]])
+      if rank == 3:
+        outputs = standard_ops.matmul(inputs, self.kernel)
+      else:
+        outputs = standard_ops.tensordot(inputs, self.kernel, [[rank - 1], [0]])
+
       # Reshape the output back to the original ndim of the input.
       if not context.executing_eagerly():
         shape = inputs.shape.as_list()
