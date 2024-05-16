@@ -60,13 +60,11 @@ std::string DumpToString(const llvm::Module* module);
 std::string DumpToString(const llvm::Type* type);
 std::string DumpToString(const llvm::Value* value);
 
-// This also works for mlir::Op<...> descendants, such as mlir::ModuleOp and
-// mlir::lmhlo::FusionOp.
+// This also works for mlir::Op<...> descendants, such as mlir::ModuleOp.
 //
 // For findability:
 //   std::string DumpToString(mlir::Op<...>& op);
 //   std::string DumpToString(mlir::ModuleOp& module_op);
-//   std::string DumpToString(mlir::lmhlo::FusionOp& fusion_op);
 //
 // The `operation` parameter is not const, because the used print() method is
 // not const.
@@ -143,9 +141,8 @@ llvm::Type* ShapeToIrType(const Shape& shape, llvm::Module* module);
 
 // Returns a value that represents a pointer to a global string constant that
 // encodes the shape as a serialized protobuf.
-StatusOr<llvm::Value*> EncodeSelfDescribingShapeConstant(const Shape& shape,
-                                                         int32_t* shape_size,
-                                                         llvm::IRBuilder<>* b);
+absl::StatusOr<llvm::Value*> EncodeSelfDescribingShapeConstant(
+    const Shape& shape, int32_t* shape_size, llvm::IRBuilder<>* b);
 
 // Converts a given literal to an IR Constant. Literals have known constant
 // values at IR emission time.
@@ -273,7 +270,8 @@ void SetDereferenceableMetadataForLoad(llvm::LoadInst* load,
 
 // Tells LLVM `inst >= lower && inst < upper`. Returns `inst` for convenience.
 llvm::Instruction* AddRangeMetadata(int32_t lower, int32_t upper,
-                                    llvm::Instruction* inst);
+                                    llvm::Instruction* inst,
+                                    llvm::Module* module);
 
 void SetToFirstInsertPoint(llvm::BasicBlock* blk, llvm::IRBuilder<>* builder);
 

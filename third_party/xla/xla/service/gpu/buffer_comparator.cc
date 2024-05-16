@@ -18,7 +18,6 @@ limitations under the License.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <memory>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -27,11 +26,12 @@ limitations under the License.
 #include "xla/service/gpu/launch_dimensions.h"
 #include "xla/service/hlo_module_config.h"
 #include "xla/shape.h"
-#include "xla/statusor.h"
+#include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/device_memory.h"
-#include "xla/stream_executor/device_memory_allocator.h"
+#include "xla/stream_executor/device_memory_handle.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/stream_executor.h"
+#include "xla/stream_executor/typed_kernel_factory.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/logging.h"
@@ -61,10 +61,10 @@ static absl::StatusOr<bool> DeviceCompare(se::Stream* stream,
                                           void* kernel_symbol) {
   se::StreamExecutor* executor = stream->parent();
 
-  se::ScopedDeviceMemory<uint64_t> out_param =
-      executor->AllocateOwnedScalar<uint64_t>();
+  se::DeviceMemoryHandle out_param(executor,
+                                   executor->AllocateScalar<uint64_t>());
 
-  stream->ThenMemZero(out_param.ptr(), sizeof(uint64_t));
+  TF_RETURN_IF_ERROR(stream->MemZero(out_param.memory_ptr(), sizeof(uint64_t)));
   if (current.size() != expected.size()) {
     return Internal("Mismatched buffer size: %d bytes vs. %d bytes",
                     current.size(), expected.size());
@@ -75,11 +75,11 @@ static absl::StatusOr<bool> DeviceCompare(se::Stream* stream,
   uint64_t buffer_size = current_typed.ElementCount();
 
   TF_ASSIGN_OR_RETURN(
-      std::unique_ptr<ComparisonKernelT<ElementT>> comparison_kernel,
-      (executor->CreateTypedKernel<se::DeviceMemory<ElementT>,
-                                   se::DeviceMemory<ElementT>, float, uint64_t,
-                                   se::DeviceMemory<uint64_t>>(kernel_name,
-                                                               kernel_symbol)));
+      ComparisonKernelT<ElementT> comparison_kernel,
+      (se::TypedKernelFactory<
+          se::DeviceMemory<ElementT>, se::DeviceMemory<ElementT>, float,
+          uint64_t, se::DeviceMemory<uint64_t>>::Create(executor, kernel_name,
+                                                        kernel_symbol)));
 
   const se::DeviceDescription& gpu_device_info =
       executor->GetDeviceDescription();
@@ -87,14 +87,16 @@ static absl::StatusOr<bool> DeviceCompare(se::Stream* stream,
   LaunchDimensions dim =
       CalculateLaunchDimensions(buffer_shape, gpu_device_info);
 
+  se::DeviceMemory<uint64_t> as_uint64(out_param.memory());
   TF_RETURN_IF_ERROR(stream->ThenLaunch(
-      dim.thread_counts_per_block(), dim.block_counts(), *comparison_kernel,
+      dim.thread_counts_per_block(), dim.block_counts(), comparison_kernel,
       current_typed, expected_typed, static_cast<float>(kTolerance),
-      buffer_size, out_param.cref()));
+      buffer_size, as_uint64));
 
   uint64_t result = -1;
-  CHECK_EQ(out_param->size(), sizeof(result));
-  stream->ThenMemcpy(&result, *out_param, sizeof(result));
+  CHECK_EQ(out_param.memory().size(), sizeof(result));
+  TF_RETURN_IF_ERROR(
+      stream->Memcpy(&result, out_param.memory(), sizeof(result)));
   TF_RETURN_IF_ERROR(stream->BlockHostUntilDone());
   return result == 0;
 }
@@ -109,8 +111,10 @@ absl::StatusOr<bool> HostCompare(se::Stream* stream,
                                  se::DeviceMemoryBase expected) {
   int64_t n = current.size() / sizeof(ElementType);
   std::vector<ElementType> host_current(n), host_expected(n);
-  stream->ThenMemcpy(host_current.data(), current, current.size());
-  stream->ThenMemcpy(host_expected.data(), expected, expected.size());
+  TF_RETURN_IF_ERROR(
+      stream->Memcpy(host_current.data(), current, current.size()));
+  TF_RETURN_IF_ERROR(
+      stream->Memcpy(host_expected.data(), expected, expected.size()));
   TF_RETURN_IF_ERROR(stream->BlockHostUntilDone());
 
   const auto canonicalize = [](ComparisonType a) -> ComparisonType {

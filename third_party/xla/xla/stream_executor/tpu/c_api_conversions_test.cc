@@ -23,7 +23,6 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 #include "absl/status/statusor.h"
-#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/executable_run_options.h"
@@ -34,11 +33,11 @@ limitations under the License.
 #include "xla/service/hlo_parser.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
-#include "xla/statusor.h"
 #include "xla/stream_executor/tpu/c_api_decl.h"
 #include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/protobuf.h"
+#include "tsl/platform/statusor.h"
 
 namespace ApiConverter {
 
@@ -295,7 +294,7 @@ TEST(XlaShape, FromCNested) {
 // TODO(b/290654348): xla::ShapeIndex, xla::Literal, xla::ShapedBuffer
 
 TEST(XlaHloModuleConfig, ToAndFromC) {
-  xla::StatusOr<std::unique_ptr<xla::HloModule>> hlo_module =
+  absl::StatusOr<std::unique_ptr<xla::HloModule>> hlo_module =
       xla::ParseAndReturnUnverifiedModule(kHloString);
   ASSERT_TRUE(hlo_module.ok());
   xla::HloModule& cpp_module = *hlo_module.value();
@@ -318,13 +317,13 @@ TEST(XlaHloModuleConfig, ToAndFromC) {
 }
 
 TEST(XlaHloModule, ToAndFromC) {
-  xla::StatusOr<std::unique_ptr<xla::HloModule>> hlo_module =
+  absl::StatusOr<std::unique_ptr<xla::HloModule>> hlo_module =
       xla::ParseAndReturnUnverifiedModule(kHloString);
   ASSERT_TRUE(hlo_module.ok());
   xla::HloModule& in_module = *hlo_module.value();
 
   XLA_HloModule c_module = ToC(in_module);
-  xla::StatusOr<std::unique_ptr<xla::HloModule>> out_module_ptr =
+  absl::StatusOr<std::unique_ptr<xla::HloModule>> out_module_ptr =
       FromC(c_module);
   ASSERT_TRUE(out_module_ptr.ok());
   xla::HloModule& out_module = *out_module_ptr.value();

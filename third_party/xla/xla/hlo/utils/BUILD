@@ -1,14 +1,15 @@
 # Description:
 #   Implementation of XLA’s HLO utilities used for higher-level transformations.
 
+load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 load(
     "//xla:xla.bzl",
     "xla_cc_test",
 )
-load("@local_tsl//tsl/platform:rules_cc.bzl", "cc_library")
 
 package(
-    default_visibility = ["//visibility:public"],
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
+    default_visibility = [":friends"],
     licenses = ["notice"],
 )
 
@@ -23,7 +24,6 @@ cc_library(
     name = "hlo_live_range",
     srcs = ["hlo_live_range.cc"],
     hdrs = ["hlo_live_range.h"],
-    visibility = ["//visibility:public"],
     deps = [
         "//xla:shape_util",
         "//xla:statusor",
@@ -65,9 +65,9 @@ cc_library(
     testonly = 1,
     srcs = ["hlo_matchers.cc"],
     hdrs = ["hlo_matchers.h"],
-    visibility = ["//visibility:public"],
     deps = [
         "//xla:test",
+        "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
         "//xla/service:hlo_parser",
         "@com_google_absl//absl/strings",
@@ -81,8 +81,10 @@ xla_cc_test(
         ":hlo_matchers",
         "//xla:literal_util",
         "//xla:shape_util",
+        "//xla:xla_data_proto_cc",
         "//xla/tests:hlo_test_base",
         "//xla/tests:xla_internal_test_main",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -94,14 +96,12 @@ cc_library(
     hdrs = [
         "hlo_sharding_util.h",
     ],
-    visibility = ["//visibility:public"],
     deps = [
         "//xla:array",
         "//xla:literal_util",
         "//xla:protobuf_util",
         "//xla:shape_util",
         "//xla:status",
-        "//xla:statusor",
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla/hlo/ir:hlo",
@@ -117,6 +117,8 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "@local_tsl//tsl/platform:errors",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )
 
@@ -144,12 +146,27 @@ cc_library(
     name = "hlo_query",
     srcs = ["hlo_query.cc"],
     hdrs = ["hlo_query.h"],
-    visibility = ["//visibility:public"],
     deps = [
         "//xla:literal",
         "//xla:shape_util",
         "//xla/hlo/ir:hlo",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_set",
+    ],
+)
+
+xla_cc_test(
+    name = "hlo_query_test",
+    srcs = [
+        "hlo_query_test.cc",
+    ],
+    deps = [
+        ":hlo_query",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_parser",
+        "//xla/tests:hlo_test_base",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+        "@local_tsl//tsl/platform:statusor",
     ],
 )

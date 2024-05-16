@@ -16,16 +16,19 @@ limitations under the License.
 #include "xla/service/gpu/kernels/cutlass_gemm_fusion.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
+#include "xla/service/gpu/backend_configs.pb.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
 #include "xla/service/gpu/kernels/custom_kernel_fusion.h"
 #include "xla/service/gpu/kernels/custom_kernel_fusion_pattern.h"
@@ -34,7 +37,6 @@ limitations under the License.
 #include "xla/service/pattern_matcher.h"
 #include "xla/shape.h"
 #include "xla/status.h"
-#include "xla/statusor.h"
 #include "xla/stream_executor/device_description.h"
 #include "xla/xla_data.pb.h"
 #include "tsl/platform/errors.h"
@@ -82,7 +84,13 @@ struct GemmWithDynamicSlice {
   explicit GemmWithDynamicSlice(HloDynamicUpdateSliceInstruction* update_slice)
       : update_slice(update_slice) {}
 
-  std::vector<HloInstruction*> Instrs() { return {dot, bitcast, update_slice}; }
+  std::vector<HloInstruction*> Instrs() {
+    // Bitcast could be optional
+    if (bitcast == nullptr) {
+      return {dot, update_slice};
+    }
+    return {dot, bitcast, update_slice};
+  }
 
   HloInstruction* dot = nullptr;
   HloInstruction* bitcast = nullptr;       // result bitcast
@@ -152,14 +160,20 @@ static absl::StatusOr<GemmWithUpcast> MatchGemmWithUpcast(
   return absl::InternalError("unsupported gemm with upcasing");
 }
 
+template <typename Pattern>
+auto OptionalBitcast(HloInstruction** optional_bitcast, Pattern pattern) {
+  return m::AnyOf<HloInstruction>(m::Bitcast(optional_bitcast, pattern),
+                                  std::move(pattern));
+}
+
 // Returns matched GEMM with result used to update a slice.
 static absl::StatusOr<GemmWithDynamicSlice> MatchGemmWithDynamicUpdateSlice(
     HloDynamicUpdateSliceInstruction* update_slice) {
   GemmWithDynamicSlice match(update_slice);
 
-  if (!Match(
-          const_cast<HloInstruction*>(update_slice->operand(1)),
-          m::Bitcast(&match.bitcast, m::Dot(&match.dot, m::Op(), m::Op())))) {
+  if (!Match(const_cast<HloInstruction*>(update_slice->update()),
+             OptionalBitcast(&match.bitcast,
+                             m::Dot(&match.dot, m::Op(), m::Op())))) {
     return absl::InternalError("failed to match update slice instr");
   }
 
@@ -167,6 +181,22 @@ static absl::StatusOr<GemmWithDynamicSlice> MatchGemmWithDynamicUpdateSlice(
 
   return match;
 }
+
+static bool AreInstructionsOnTheSameStream(
+    absl::Span<const HloInstruction* const> instructions) {
+  absl::flat_hash_set<int64_t> stream_set;
+  for (const HloInstruction* inst : instructions) {
+    auto gpu_config = inst->backend_config<GpuBackendConfig>();
+    if (!gpu_config.ok()) {
+      continue;
+    }
+    stream_set.insert(gpu_config->operation_queue_id());
+    if (stream_set.size() > 1) {
+      return false;
+    }
+  }
+  return true;
+};
 
 //===----------------------------------------------------------------------===//
 // Cutlass Gemm Patterns
@@ -192,7 +222,8 @@ CutlassGemmWithDynamicUpdateSlicePattern::TryMatch(
   if (!update_slice) return std::nullopt;
 
   auto matched = MatchGemmWithDynamicUpdateSlice(update_slice);
-  if (!matched.ok()) return std::nullopt;
+  if (!matched.ok() || !AreInstructionsOnTheSameStream(matched->Instrs()))
+    return std::nullopt;
 
   CustomFusionConfig config;
   config.set_name("cutlass_gemm_with_dynamic_update_slice");
@@ -204,9 +235,12 @@ CutlassGemmWithDynamicUpdateSlicePattern::TryMatch(
   match.AddReplacement(matched->dot, [=](HloFusionInstruction* fusion) {
     HloComputation* parent = fusion->parent();
     auto* dus = Cast<HloDynamicUpdateSliceInstruction>(matched->update_slice);
+    bool has_bitcast = matched->bitcast != nullptr;
+    const Shape dus_shape =
+        has_bitcast ? matched->bitcast->shape() : matched->dot->shape();
     auto* slice = parent->AddInstruction(HloInstruction::CreateDynamicSlice(
-        matched->bitcast->shape(), fusion, dus->index_operands(),
-        matched->bitcast->shape().dimensions()));
+        dus_shape, fusion, dus->index_operands(), dus_shape.dimensions()));
+
     return parent->AddInstruction(
         HloInstruction::CreateBitcast(matched->dot->shape(), slice));
   });
@@ -337,7 +371,6 @@ class CutlassGemmWithDynamicUpdateSliceFusion : public CustomKernelFusion {
     // Mapping to a buffer that holds output slice offset.
     auto* offset =
         Cast<HloParameterInstruction>(matched.update_slice->operand(2));
-
     kernel::gemm_universal::DynamicSliceIndices slices;
     slices.out = offset->parameter_number();
 

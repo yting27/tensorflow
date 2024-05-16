@@ -75,7 +75,7 @@ class BFloat16ConversionFoldingTest : public HloTestBase {
   bool FoldConversions(HloModule* module) {
     TestBFloat16Support bfloat16_support_;
     BFloat16ConversionFolding fold(&bfloat16_support_);
-    StatusOr<bool> result = fold.Run(module);
+    absl::StatusOr<bool> result = fold.Run(module);
     EXPECT_IS_OK(result.status());
     return result.value();
   }
@@ -239,7 +239,7 @@ TEST_F(BFloat16ConversionFoldingTest, FoldAllReduceTupleOutput) {
 
   HloInstruction* crs = builder.AddInstruction(HloInstruction::CreateAllReduce(
       ShapeUtil::MakeTupleShape({f32_shape, f32_shape}), {convert_a, b}, sum,
-      /*replica_groups=*/{},
+      /*device_list=*/CollectiveDeviceList(),
       /*constrain_layout=*/false,
       /*channel_id=*/std::nullopt, /*use_global_device_ids=*/false));
   HloInstruction* gte_a = builder.AddInstruction(

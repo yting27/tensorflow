@@ -16,6 +16,7 @@ limitations under the License.
 #include "xla/pjrt/distributed/topology_util.h"
 
 #include <fstream>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,7 +51,7 @@ static constexpr char kBootIdPath[] = "/proc/sys/kernel/random/boot_id";
 // Retrieve content of /proc/sys/kernel/random/boot_id as a string.
 // Note that procfs file may have file size 0 which throws off generic file
 // readers such as tsl::ReadFileToString.
-StatusOr<std::string> GetBootIdString() {
+absl::StatusOr<std::string> GetBootIdString() {
   std::string boot_id_str;
 #ifdef __linux__
   std::ifstream file(kBootIdPath);
@@ -74,7 +75,7 @@ static std::string GetGlobalTopologyKey(std::string_view platform) {
   return absl::StrCat("global_topology/", platform);
 }
 
-static StatusOr<std::vector<LocalTopologyProto>> GetAllLocalTopologies(
+static absl::StatusOr<std::vector<LocalTopologyProto>> GetAllLocalTopologies(
     std::string_view platform, int num_nodes, KeyValueStoreInterface* kv_store,
     absl::Duration timeout) {
   std::vector<StatusOr<std::string>> local_topology_strs(num_nodes);
@@ -87,7 +88,7 @@ static StatusOr<std::vector<LocalTopologyProto>> GetAllLocalTopologies(
   absl::Mutex mu;
   for (int i = 0; i < num_nodes; i++) {
     thread_pool.Schedule([&, i] {
-      StatusOr<std::string> local_topology_str =
+      absl::StatusOr<std::string> local_topology_str =
           kv_store->Get(GetLocalTopologyKey(platform, i), timeout);
       {
         absl::MutexLock lock(&mu);
@@ -102,7 +103,7 @@ static StatusOr<std::vector<LocalTopologyProto>> GetAllLocalTopologies(
   std::vector<LocalTopologyProto> local_topologies;
   int max_num_failed_message = 10;
   int failed_count = 0;
-  for (const StatusOr<std::string>& str : local_topology_strs) {
+  for (const absl::StatusOr<std::string>& str : local_topology_strs) {
     if (str.ok()) {
       LocalTopologyProto local;
       local.ParseFromString(*str);
@@ -195,6 +196,51 @@ Status ExchangeTopologies(std::string_view platform, int node_id, int num_nodes,
   VLOG(3) << "Global topology for platform " << platform << ":\n"
           << global_topology->DebugString();
   return absl::OkStatus();
+}
+
+absl::StatusOr<GpuTopologyProto> BuildGpuTopology(
+    const GlobalTopologyProto& global_topology) {
+  GpuTopologyProto gpu_topology;
+  std::map<int, std::vector<int>> slice_id_to_node_ids;
+  std::vector<int> device_ids;
+  for (int i = 0; i < global_topology.nodes_size(); ++i) {
+    const LocalTopologyProto& local_topology = global_topology.nodes(i);
+
+    slice_id_to_node_ids[local_topology.devices(0).slice_index()].push_back(
+        local_topology.node_id());
+
+    // Initializes GPU topology with the first local topology.
+    if (i == 0) {
+      gpu_topology.set_platform_version((local_topology.devices(0).name()));
+      gpu_topology.set_num_devices_per_host(local_topology.devices_size());
+    } else {
+      // Check for consistent number of devices per host.
+      if (gpu_topology.num_devices_per_host() !=
+          local_topology.devices_size()) {
+        return absl::InternalError(
+            "GpuTopology doesn't support multi-host with different number of "
+            "devices per host.");
+      }
+    }
+
+    for (const DeviceProto& device : local_topology.devices()) {
+      device_ids.push_back(device.global_device_id());
+    }
+  }
+
+  gpu_topology.set_num_slices(slice_id_to_node_ids.size());
+  gpu_topology.set_num_hosts_per_slice(
+      slice_id_to_node_ids.begin()->second.size());
+  // Check for consistent number of hosts per slice.
+  for (const auto& [boot_id, node_ids] : slice_id_to_node_ids) {
+    if (node_ids.size() != gpu_topology.num_hosts_per_slice()) {
+      return absl::InternalError(
+          "GpuTopology doesn't support multi-host with different number of "
+          "hosts per slice.");
+    }
+  }
+  gpu_topology.mutable_device_ids()->Add(device_ids.begin(), device_ids.end());
+  return gpu_topology;
 }
 
 }  // namespace xla

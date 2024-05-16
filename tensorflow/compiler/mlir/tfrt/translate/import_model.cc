@@ -80,7 +80,7 @@ namespace {
 
 // Exports all XLA functions in the form of XlaLaunch, and their nested
 // functions.
-StatusOr<std::vector<FunctionDef>> ExportXlaFunctions(
+absl::StatusOr<std::vector<FunctionDef>> ExportXlaFunctions(
     mlir::ModuleOp module, std::vector<std::string>* added_xla_function_names) {
   // Find all XLA functions.
   std::vector<std::string> xla_functions;
@@ -123,7 +123,7 @@ StatusOr<std::vector<FunctionDef>> ExportXlaFunctions(
     func_op->walk([&](mlir::Operation* op) {
       for (const mlir::NamedAttribute& attr : op->getAttrs()) {
         if (const auto sym =
-                attr.getValue().dyn_cast<mlir::FlatSymbolRefAttr>()) {
+                mlir::dyn_cast<mlir::FlatSymbolRefAttr>(attr.getValue())) {
           mlir::Operation* func =
               mlir::SymbolTable::lookupNearestSymbolFrom(op, sym);
           if (func) {
@@ -146,35 +146,6 @@ StatusOr<std::vector<FunctionDef>> ExportXlaFunctions(
 }
 
 }  // namespace
-
-Status ConvertFunctionToBef(
-    mlir::StringRef function_name, const tensorflow::FunctionBody* fbody,
-    const FunctionLibraryDefinition& flib_def,
-    tfrt::ArrayRef<tfrt::string_view> devices,
-    const tensorflow::TfrtFunctionCompileOptions& options,
-    tfrt::BefBuffer* bef_buffer) {
-  mlir::MLIRContext context;
-  // FunctionDef -> TF Dialect
-  auto expected_module =
-      tensorflow::ConvertFunctionToMlir(fbody, flib_def, &context);
-
-  if (!expected_module.ok())
-    return absl::InternalError(absl::StrCat(
-        "Failed to convert function to mlir for function ", function_name.str(),
-        ". Error: ", expected_module.status().message()));
-
-  auto module = std::move(expected_module).value();
-
-  // Attach devices to the MLIR module.
-  if (!devices.empty()) {
-    mlir::Builder builder(module->getContext());
-    module->getOperation()->setAttr("tf.devices",
-                                    builder.getStrArrayAttr(devices));
-  }
-
-  // TF Dialect -> BEF
-  return tensorflow::CompileTFMLIRToBEF(options, module.get(), bef_buffer);
-}
 
 Status ConvertTfMlirToRuntimeExecutable(
     const TfrtCompileOptions& options, mlir::ModuleOp module,
@@ -238,7 +209,7 @@ Status ConvertTfMlirToRuntimeExecutable(
 
     TF_RETURN_IF_ERROR(
         tensorflow::tf2xla::v2::RunFunctionTf2xlaClusteringBridge(
-            module, tf2xla::v2::DeviceType::XLA_TPU_JIT,
+            module, /*is_supported_by_replicated_brige*/ true,
             /*is_in_fallback_enabled_mode=*/VLOG_IS_ON(1)));
 
     TF_RETURN_IF_ERROR(
@@ -257,7 +228,7 @@ Status ConvertTfMlirToRuntimeExecutable(
   } else if (options.device_target == TfrtDeviceInfraTarget::kGpu) {
     TF_RETURN_IF_ERROR(
         tensorflow::tf2xla::v2::RunFunctionTf2xlaClusteringBridge(
-            module, tf2xla::v2::DeviceType::XLA_GPU_JIT,
+            module, /*is_supported_by_replicated_brige*/ false,
             /*is_in_fallback_enabled_mode=*/false));
 
     TF_RETURN_IF_ERROR(
@@ -335,7 +306,7 @@ Status ConvertTfMlirToBef(const TfrtCompileOptions& options,
               absl::InternalError("failed to convert MLIR to BEF."));
 
         bef_buffer->shrink_to_fit();
-        return OkStatus();
+        return absl::OkStatus();
       },
       model_context, fallback_state, added_xla_function_names);
 }
@@ -371,10 +342,11 @@ std::unique_ptr<tensorflow::TfrtPipelineOptions> GetTfrtPipelineOptions(
   pipeline_options->hoist_invariant_ops = options.hoist_invariant_ops;
   pipeline_options->fuse_get_resource_ops_in_hoisting =
       options.fuse_get_resource_ops_in_hoisting;
-  pipeline_options->func_use_fallback_tensor = true;
   pipeline_options->enable_while_parallel_iterations =
       options.enable_while_parallel_iterations;
   pipeline_options->cost_threshold = options.cost_threshold;
+  pipeline_options->min_num_batch_threads = options.min_num_batch_threads;
+
   pipeline_options->merge_inter_dependent_streams =
       options.merge_inter_dependent_streams;
 
@@ -393,7 +365,7 @@ tensorflow::Status AddXlaFunctions(
     }
   }
 
-  return tensorflow::OkStatus();
+  return absl::OkStatus();
 }
 
 }  // namespace tensorflow

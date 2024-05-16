@@ -265,15 +265,10 @@ class SegmentReductionGPUOp : public AsyncOpKernel {
     ScratchSpace<Index> output_rows_host(context, 1, /* on_host */ true);
 
     auto stream = context->op_device_context()->stream();
-    OP_REQUIRES_ASYNC(
-        context,
-        stream
-            ->ThenMemcpy(output_rows_host.mutable_data(), output_rows_device,
-                         sizeof(Index))
-            .ok(),
-        errors::Internal(type_string() +
-                         ": failed to copy output_rows from device"),
-        done);
+    OP_REQUIRES_OK_ASYNC(context,
+                         stream->Memcpy(output_rows_host.mutable_data(),
+                                        output_rows_device, sizeof(Index)),
+                         done);
 
     SegmentReductionFunctor functor_;
     auto create_and_check_output = [context, output_rows_host, &input,
@@ -498,7 +493,7 @@ class UnsortedSegmentReductionOp : public OpKernel {
                    internal::ValidateUnsortedSegmentReduction(
                        this, context, data, segment_ids, num_segments));
     const auto segment_flat = segment_ids.flat<Index>();
-    const int64_t output_rows = internal::SubtleMustCopy(static_cast<int64_t>(
+    const Index output_rows = internal::SubtleMustCopy(static_cast<Index>(
         num_segments.dtype() == DT_INT32 ? num_segments.scalar<int32>()()
                                          : num_segments.scalar<int64_t>()()));
     OP_REQUIRES(context, output_rows >= 0,
@@ -964,14 +959,10 @@ class SparseSegmentReductionOpBase<GPUDevice, T, Index, SegmentId>
           const_cast<Tensor&>(segment_ids).template flat<SegmentId>().data() +
           (num_indices - 1));
       auto stream = context->op_device_context()->stream();
-      OP_REQUIRES_ASYNC(
+      OP_REQUIRES_OK_ASYNC(
           context,
-          stream
-              ->ThenMemcpy(last_segment_id_host.mutable_data(),
-                           last_segment_id_device, sizeof(SegmentId))
-              .ok(),
-          errors::Internal(type_string() +
-                           ": failed to copy last_segment_id from device"),
+          stream->Memcpy(last_segment_id_host.mutable_data(),
+                         last_segment_id_device, sizeof(SegmentId)),
           done);
       context->device()
           ->tensorflow_accelerator_device_info()
@@ -1355,7 +1346,7 @@ class SparseSegmentGradV2OpCommon {
       Tensor* sorted_unique_indices = nullptr;
       TF_RETURN_IF_ERROR(context->allocate_output(1, TensorShape({0}),
                                                   &sorted_unique_indices));
-      return OkStatus();
+      return absl::OkStatus();
     }
 
     auto input_flat = input.flat_outer_dims<T>();
@@ -1366,7 +1357,7 @@ class SparseSegmentGradV2OpCommon {
         context, operation, input_flat, indices_vec, segment_vec,
         dense_output_shape, done);
 
-    return OkStatus();
+    return absl::OkStatus();
   }
 };
 

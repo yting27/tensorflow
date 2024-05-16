@@ -22,8 +22,8 @@ limitations under the License.
 #include <memory>
 #include <optional>
 #include <set>
-#include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -56,7 +56,6 @@ limitations under the License.
 #include "xla/shape_util.h"
 #include "xla/status.h"
 #include "xla/status_macros.h"
-#include "xla/statusor.h"
 #include "xla/util.h"
 #include "tsl/platform/errors.h"
 
@@ -723,7 +722,7 @@ class MemoryUsageTracker {
 
   // Get the compact shape of given hlo instruction. An internal cache is used
   // to avoid computing the shape multiple times.
-  StatusOr<Shape> GetCompactShape(const HloInstruction* hlo);
+  absl::StatusOr<Shape> GetCompactShape(const HloInstruction* hlo);
 
   // Creates a Buffer representing the given logical buffer. The buffer is added
   // to buffers_ and a reference is returned.
@@ -1506,7 +1505,8 @@ std::string MemoryUsageTracker::ToString() const {
   return output;
 }
 
-StatusOr<Shape> MemoryUsageTracker::GetCompactShape(const HloInstruction* hlo) {
+absl::StatusOr<Shape> MemoryUsageTracker::GetCompactShape(
+    const HloInstruction* hlo) {
   auto it = compact_shape_.find(hlo);
   if (it != compact_shape_.end()) {
     return it->second;
@@ -1988,7 +1988,7 @@ UsesList MemoryUsageTracker::GetItemUses(Item* item) const {
   return combined_users;
 }
 
-StatusOr<int64_t> RematerializeInstructions(
+absl::StatusOr<int64_t> RematerializeInstructions(
     MemoryUsageTracker* memory_tracker, std::vector<Item*>* best_items,
     absl::flat_hash_set<const HloInstruction*>* remat_move_instructions,
     InstructionList* instruction_list, HloSchedule* schedule,
@@ -2059,7 +2059,8 @@ StatusOr<int64_t> RematerializeInstructions(
                 HloInstruction::CreateGetTupleElement(
                     ShapeUtil::GetTupleElementShape(remat_use->shape(),
                                                     *user.index),
-                    remat_use, *user.index));
+                    remat_use, *user.index),
+                /*new_name=*/"gte.remat");
             indirect_users.push_back(instruction_list->CreateItem(remat_use));
             gte_cache[*user.index] = remat_use;
           } else {
@@ -2068,7 +2069,8 @@ StatusOr<int64_t> RematerializeInstructions(
         }
         if (user_operand->shape() != remat_use->shape()) {
           remat_use = computation->AddInstruction(
-              HloInstruction::CreateBitcast(user_operand->shape(), remat_use));
+              HloInstruction::CreateBitcast(user_operand->shape(), remat_use),
+              /*new_name=*/"bitcast.remat");
           indirect_users.push_back(instruction_list->CreateItem(remat_use));
         }
         TF_RETURN_IF_ERROR(user.user->instruction->ReplaceOperandWith(
@@ -2161,16 +2163,20 @@ StatusOr<int64_t> RematerializeInstructions(
       VLOG(2) << "The old instruction " << best->name()
               << " is an async op. Removing to maintain one start to one done "
                  "invariant to keep the HLO valid.";
+      // We need to remove all control dependencies from best before removing it
+      // from the computation.  Its control dependencies were previously copied
+      // to the remat instruction.
+      TF_RETURN_IF_ERROR(best->DropAllControlDeps());
       TF_RETURN_IF_ERROR(computation->RemoveInstruction(best));
     }
   }
   return net_instructions_added;
 }
 
-StatusOr<int64_t> CompressInstruction(MemoryUsageTracker* memory_tracker,
-                                      Item* best_item,
-                                      const Shape& compact_shape,
-                                      InstructionList* instruction_list) {
+absl::StatusOr<int64_t> CompressInstruction(MemoryUsageTracker* memory_tracker,
+                                            Item* best_item,
+                                            const Shape& compact_shape,
+                                            InstructionList* instruction_list) {
   HloInstruction* best = best_item->instruction;
   VLOG(5) << "Transposing instruction " << best->name() << " (saving "
           << HumanReadableNumBytes(memory_tracker->MemoryReducedIfCompressed(
@@ -2220,9 +2226,9 @@ StatusOr<int64_t> CompressInstruction(MemoryUsageTracker* memory_tracker,
   return 2;
 }
 
-StatusOr<int64_t> OffloadInstruction(MemoryUsageTracker* memory_tracker,
-                                     Item* best_item,
-                                     InstructionList* instruction_list) {
+absl::StatusOr<int64_t> OffloadInstruction(MemoryUsageTracker* memory_tracker,
+                                           Item* best_item,
+                                           InstructionList* instruction_list) {
   HloInstruction* best_instruction = best_item->instruction;
   HloComputation* computation = best_instruction->parent();
   VLOG(2) << "Best_instruction's users: "
@@ -2497,7 +2503,7 @@ struct InstructionsAdded {
 // Rematerializes the best block of instructions of size between min_block_size
 // and max_block_size (both inclusive) if at least one candidate block of
 // instructions can be found. Returns number of instructions rematerialized.
-StatusOr<InstructionsAdded> RematerializeBestBlock(
+absl::StatusOr<InstructionsAdded> RematerializeBestBlock(
     int min_block_size, int max_block_size, MemoryUsageTracker* memory_tracker,
     InstructionList* instruction_list, HloSchedule* schedule,
     int64_t memory_limit_bytes,
@@ -2566,7 +2572,7 @@ StatusOr<InstructionsAdded> RematerializeBestBlock(
 }
 }  // namespace
 
-StatusOr<int64_t> HloRematerialization::ComputePeakMemory(
+absl::StatusOr<int64_t> HloRematerialization::ComputePeakMemory(
     const HloComputation* computation, const HloInstructionSequence& order,
     const absl::flat_hash_set<absl::string_view>& execution_threads) const {
   InstructionList instruction_list(order);
@@ -2589,7 +2595,7 @@ StatusOr<int64_t> HloRematerialization::ComputePeakMemory(
   return peak_memory;
 }
 
-StatusOr<int64_t> HloRematerialization::CalledComputationsMemoryUsage(
+absl::StatusOr<int64_t> HloRematerialization::CalledComputationsMemoryUsage(
     const HloInstruction* instruction,
     const absl::flat_hash_set<absl::string_view>& execution_threads) const {
   const CallSite* callsite =
@@ -2609,7 +2615,7 @@ StatusOr<int64_t> HloRematerialization::CalledComputationsMemoryUsage(
   return callee_usage;
 }
 
-StatusOr<bool> HloRematerialization::RematerializeComputation(
+absl::StatusOr<bool> HloRematerialization::RematerializeComputation(
     HloComputation* computation, HloSchedule* schedule,
     int64_t memory_limit_bytes, int64_t min_remat_size,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
@@ -2754,7 +2760,9 @@ StatusOr<bool> HloRematerialization::RematerializeComputation(
       // in the callee computations.
       for (HloComputation* called_computation :
            callsite->called_computations()) {
-        if (!ContainsKey(rematerialized_computations_, called_computation)) {
+        if (!ContainsKey(rematerialized_computations_, called_computation) &&
+            HloInstruction::IsThreadIncluded(
+                called_computation->execution_thread(), execution_threads)) {
           // Memory limit for the subcomputation is the memory limit less the
           // amount of memory used at this point in the computation.
           int64_t subcomputation_memory_limit_bytes = std::max<int64_t>(
@@ -2811,7 +2819,7 @@ StatusOr<bool> HloRematerialization::RematerializeComputation(
   return changed;
 }
 
-StatusOr<bool> HloRematerialization::Run(
+absl::StatusOr<bool> HloRematerialization::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   if (options_.remat_mode_config.host_offload) {
@@ -2855,15 +2863,67 @@ StatusOr<bool> HloRematerialization::Run(
         module_output_size += options_.hlo_cost_analysis.GetShapeSize(subshape);
       });
 
-  const int64_t adjusted_memory_limit_bytes =
+  int64_t adjusted_memory_limit_bytes =
       std::max<int64_t>(0, options_.memory_limit_bytes - module_output_size);
   VLOG(1) << "Adjusted memory limit accounting for output ("
           << HumanReadableNumBytes(module_output_size)
           << "): " << HumanReadableNumBytes(adjusted_memory_limit_bytes);
 
+  call_graph_ = CallGraph::Build(module);
+
+  // Buffer assignment allocates a single stack for all asynchronous
+  // computations of the same thread, which persists for the entire duration of
+  // the program. We need to account for this by adjusting the memory limit.
+  int64_t total_async_peak_memory = 0;
+  if (!options_.async_computation_parallelism.empty()) {
+    // We cannot compute memory usage for both the main and asynchronous threads
+    // at the same time, as that will cause the asynchronous callee usage to be
+    // added to the main thread callers usage. The callee's memory is
+    // preallocated, so the caller doesn't pay for it.
+    absl::flat_hash_set<std::string_view> async_threads;
+    for (const auto& [computation, _] :
+         options_.async_computation_parallelism) {
+      async_threads.insert(computation->execution_thread());
+    }
+    TF_RETURN_IF_ERROR(call_graph_->VisitNodes(
+        [this, module, &async_threads](const CallGraphNode& node) -> Status {
+          auto callee_thread = node.computation()->execution_thread();
+          if (node.context() == CallContext::kControlFlow &&
+              HloInstruction::IsThreadIncluded(callee_thread, async_threads)) {
+            TF_ASSIGN_OR_RETURN(computation_peak_memory_[node.computation()],
+                                ComputePeakMemory(node.computation(),
+                                                  module->schedule().sequence(
+                                                      node.computation()),
+                                                  {callee_thread}));
+          }
+          return OkStatus();
+        },
+        /*visit_unreachable_nodes=*/false));
+
+    int64_t async_peak_memory = 0;
+    // Only consider asynchronous computations invoked from the main thread.
+    for (const auto [entry_computation, parallel_threads] :
+         options_.async_computation_parallelism) {
+      const int64_t peak_memory =
+          computation_peak_memory_.at(entry_computation);
+      // Adjust memory usage for parallel execution of the same computation
+      // on different devices.
+      const int64_t parallel_peak_memory = peak_memory * parallel_threads;
+      async_peak_memory = std::max(async_peak_memory, parallel_peak_memory);
+    }
+    adjusted_memory_limit_bytes =
+        std::max<int64_t>(0, adjusted_memory_limit_bytes - async_peak_memory);
+    total_async_peak_memory += async_peak_memory;
+    VLOG(1) << "Adjusted memory limit accounting for async computations ("
+            << HumanReadableNumBytes(async_peak_memory)
+            << "): " << HumanReadableNumBytes(adjusted_memory_limit_bytes);
+
+    // Reset back to a clean state, since we don't expect to utilize the
+    // async computation memory usage anymore.
+    computation_peak_memory_.clear();
+  }
   // Compute peak memory usage of all computations in the module called in a
   // sequential context.
-  call_graph_ = CallGraph::Build(module);
   TF_RETURN_IF_ERROR(call_graph_->VisitNodes(
       [this, module, &execution_threads](const CallGraphNode& node) -> Status {
         if (node.context() == CallContext::kControlFlow &&
@@ -2880,12 +2940,13 @@ StatusOr<bool> HloRematerialization::Run(
       /*visit_unreachable_nodes=*/false));
 
   // The peak memory usage of the module equals the peak memory use of the entry
-  // computation plus the output size of the computation. This is because the
-  // peak memory for a computation does not include the output as this is
-  // typically accounted for in the caller.
+  // computation plus the output size of the computation plus memory use of
+  // asynchronous computations. This is because the peak memory for a
+  // computation does not include the output as this is typically accounted for
+  // in the caller.
   const int64_t before_peak_memory =
       computation_peak_memory_.at(module->entry_computation()) +
-      module_output_size;
+      module_output_size + total_async_peak_memory;
   VLOG(1) << "Peak memory usage of module (before): "
           << HumanReadableNumBytes(before_peak_memory);
 
@@ -2921,7 +2982,7 @@ StatusOr<bool> HloRematerialization::Run(
           << net_instructions_added_ << " net instructions added";
   const int64_t current_peak_memory =
       computation_peak_memory_.at(module->entry_computation()) +
-      module_output_size;
+      module_output_size + total_async_peak_memory;
   VLOG(1) << "Peak memory usage of module now "
           << HumanReadableNumBytes(current_peak_memory) << " ("
           << current_peak_memory << " bytes), was "

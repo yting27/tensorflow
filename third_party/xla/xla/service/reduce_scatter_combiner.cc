@@ -140,7 +140,7 @@ Status CombineReduceScatters(absl::Span<HloInstruction* const> to_combine) {
   TF_RET_CHECK(operands.size() >= 2);
   combined = computation.AddInstruction(HloInstruction::CreateReduceScatter(
       ShapeUtil::MakeTupleShape(output_shapes), operands, reduction,
-      to_combine.front()->replica_groups(),
+      to_combine.front()->device_list(),
       /*constrain_layout=*/false, to_combine.front()->channel_id(),
       Cast<HloReduceScatterInstruction>(to_combine.front())
           ->use_global_device_ids(),
@@ -178,7 +178,7 @@ ReduceScatterCombiner::ReduceScatterCombiner(int64_t combine_threshold_in_bytes,
       combine_threshold_count_(combine_threshold_count),
       combine_by_dim_(combine_by_dim) {}
 
-StatusOr<bool> ReduceScatterCombiner::Run(
+absl::StatusOr<bool> ReduceScatterCombiner::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   VLOG(1) << "Running ReduceScatterCombiner with threshold of "

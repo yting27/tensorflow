@@ -31,24 +31,6 @@ limitations under the License.
 namespace xla {
 namespace ifrt {
 
-struct XlaProgram : llvm::RTTIExtends<XlaProgram, Program> {
-  XlaProgram() = default;
-  explicit XlaProgram(mlir::ModuleOp module) : mlir_module(module) {}
-  XlaProgram(std::unique_ptr<mlir::MLIRContext> context,
-             mlir::OwningOpRef<mlir::ModuleOp> module)
-      : mlir_module(*module),
-        mlir_context(std::move(context)),
-        owning_mlir_module(std::move(module)) {}
-
-  mlir::ModuleOp mlir_module;
-
-  static char ID;  // NOLINT
-
- private:
-  std::unique_ptr<mlir::MLIRContext> mlir_context;
-  mlir::OwningOpRef<mlir::ModuleOp> owning_mlir_module;
-};
-
 // Wraps compilation options for an XLA computation.
 //
 // TODO(hyeontaek): Move this class out of pjrt_ifrt.
@@ -104,12 +86,12 @@ struct XlaDeserializeExecutableOptions
 };
 
 // Gets `xla::ifrt::XlaCompileOptions` from `xla::ifrt::CompileOptions`.
-StatusOr<std::unique_ptr<XlaCompileOptions>> GetXlaCompileOptions(
+absl::StatusOr<std::unique_ptr<XlaCompileOptions>> GetXlaCompileOptions(
     std::unique_ptr<CompileOptions> options);
 
 // Gets `xla::ifrt::XlaDeserializeExecutableOptions` from
 // `xla::ifrt::DeserializeExecutableOptions`.
-StatusOr<std::unique_ptr<XlaDeserializeExecutableOptions>>
+absl::StatusOr<std::unique_ptr<XlaDeserializeExecutableOptions>>
 GetXlaDeserializeExecutableOptions(
     std::unique_ptr<DeserializeExecutableOptions> options);
 

@@ -45,11 +45,9 @@ class PostCalibrationComponent : public Component {
       ModuleOp module_op,
       const ::stablehlo::quantization::QuantizationConfig& config) override;
 
-  // Adds MLIR passes to the pass manager. `Run` will essentially run these
-  // passes on the module op. `pipeline_config` configures the behavior of the
-  // passes.
   void AddPasses(
       OpPassManager& pm,
+      const ::stablehlo::quantization::QuantizationSpecs& specs,
       const ::stablehlo::quantization::PipelineConfig& pipeline_config) const;
 
  private:

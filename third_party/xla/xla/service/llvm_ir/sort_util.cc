@@ -48,7 +48,7 @@ namespace llvm_ir {
 namespace {
 
 // Adds the inner comparison loop body where we compare elements.
-Status EmitCompareLoopBody(
+absl::Status EmitCompareLoopBody(
     int64_t iteration_bound, int64_t num_values,
     llvm::Value* element_pair_index, int64_t xor_mask, llvm::Type* index_type,
     std::function<llvm::Value*(int64_t operand, llvm::Value* index)>
@@ -153,7 +153,7 @@ Status EmitCompareLoopBody(
   });
 }
 
-Status EmitTiledCompareLoop(
+absl::Status EmitTiledCompareLoop(
     const IrArray::Index& tiled_keys_index, int64_t dimension_to_sort,
     int64_t dimension_to_sort_bound, absl::Span<const int64_t> xor_masks,
     const std::vector<IrArray>& params,
@@ -165,7 +165,8 @@ Status EmitTiledCompareLoop(
   llvm::Value* thread_id = gpu::EmitCallToTargetIntrinsic(
       gpu::TargetIntrinsicID::kThreadIdx, {}, {}, b);
   llvm_ir::AddRangeMetadata(0, tile_size / 2,
-                            llvm::cast<llvm::Instruction>(thread_id));
+                            llvm::cast<llvm::Instruction>(thread_id),
+                            b->GetInsertBlock()->getModule());
   thread_id = b->CreateIntCast(thread_id, tiled_keys_index.GetType(),
                                /*isSigned=*/true, "thread.id.x");
 
@@ -318,7 +319,7 @@ Status EmitTiledCompareLoop(
 }
 }  // namespace
 
-Status EmitSortInPlace(
+absl::Status EmitSortInPlace(
     int64_t dimension_to_sort, const std::vector<IrArray>& values_arrays,
     absl::string_view name, absl::Span<const int64_t> xor_masks,
     llvm::IRBuilder<>* b, const gpu::LaunchDimensions& launch_dimensions,
@@ -368,7 +369,7 @@ Status EmitSortInPlace(
   }
 
   auto compare_loop_body_emitter =
-      [&](const IrArray::Index& tiles_index) -> Status {
+      [&](const IrArray::Index& tiles_index) -> absl::Status {
     // Naive C++ code for the inner compare loop:
     //
     // for (int64_t i = 0; i < dimension_to_sort_bound; ++i) {

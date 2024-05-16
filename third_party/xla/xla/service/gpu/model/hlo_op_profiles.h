@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "absl/container/flat_hash_map.h"
@@ -39,6 +40,9 @@ class HloOpProfiles {
   using ProfilesNestedMap =
       absl::flat_hash_map<std::string,  // compute capability.
                           HloOpProfile>;
+
+  // Returns singleton with profiler data.
+  static const HloOpProfiles& Singleton();
 
   // Returns profile name for the gived device.
   // For CUDA, the format is "sm_XX".

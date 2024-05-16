@@ -30,11 +30,11 @@ limitations under the License.
 
 namespace xla {
 
-StatusOr<std::unique_ptr<HloModule>> PrepareReferenceModule(
+absl::StatusOr<std::unique_ptr<HloModule>> PrepareReferenceModule(
     const HloModule& test_module, HloRunnerInterface* test_runner,
     const std::function<void(HloModuleConfig*)>& config_modifier_hook,
-    const std::function<Status(const HloModule&, HloRunnerInterface*,
-                               HloModule*)>& module_modifier_hook) {
+    const std::function<absl::Status(const HloModule&, HloRunnerInterface*,
+                                     HloModule*)>& module_modifier_hook) {
   DebugOptions debug_options = GetDebugOptionsFromFlags();
   // The combination of fast math and optimizations leads to unsound code
   // transformations (see third_party/tensorflow/compiler/xla/xla.proto for

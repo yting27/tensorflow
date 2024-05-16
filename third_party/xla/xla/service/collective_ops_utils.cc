@@ -22,7 +22,9 @@ limitations under the License.
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_join.h"
+#include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
+#include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/hlo/ir/hlo_opcode.h"
 #include "xla/literal.h"
 #include "xla/literal_util.h"
@@ -89,7 +91,7 @@ std::optional<Literal> GetReductionIdentity(ReductionKind kind,
   }
 }
 
-StatusOr<std::vector<int>> GetParticipatingIDs(
+absl::StatusOr<std::vector<int>> GetParticipatingIDs(
     CollectiveOpGroupMode group_mode, int current_id,
     std::optional<int> total_participant_count,
     absl::Span<const ReplicaGroup> groups) {
@@ -131,7 +133,7 @@ StatusOr<std::vector<int>> GetParticipatingIDs(
 
 // Returns the group formation mode implied by (a) whether the operation has
 // channel_id and (b) if it has use_global_device_ids and if yes, its value.
-StatusOr<CollectiveOpGroupMode> GetCollectiveOpGroupMode(
+absl::StatusOr<CollectiveOpGroupMode> GetCollectiveOpGroupMode(
     bool has_channel_id, std::optional<bool> use_global_device_ids) {
   if (!has_channel_id) {
     if (!use_global_device_ids.has_value() || !*use_global_device_ids) {
@@ -165,7 +167,7 @@ absl::string_view CollectiveOpGroupModeToString(
   }
 }
 
-StatusOr<std::vector<std::vector<GlobalDeviceId>>>
+absl::StatusOr<std::vector<std::vector<GlobalDeviceId>>>
 GetParticipatingDevicesGroups(const DeviceAssignment& device_assignment,
                               absl::Span<const ReplicaGroup> replica_groups,
                               CollectiveOpGroupMode group_mode) {
@@ -274,7 +276,7 @@ GetParticipatingDevicesGroups(const DeviceAssignment& device_assignment,
   }
 }
 
-StatusOr<std::vector<ReplicaGroup>> GetParticipatingFlattenedIdGroups(
+absl::StatusOr<std::vector<ReplicaGroup>> GetParticipatingFlattenedIdGroups(
     const DeviceAssignment& device_assignment,
     absl::Span<const ReplicaGroup> replica_groups,
     CollectiveOpGroupMode group_mode) {
@@ -304,7 +306,7 @@ StatusOr<std::vector<ReplicaGroup>> GetParticipatingFlattenedIdGroups(
   return flattened_id_groups;
 }
 
-StatusOr<std::vector<ReplicaGroup>> GetParticipatingFlattenedIdGroups(
+absl::StatusOr<std::vector<ReplicaGroup>> GetParticipatingFlattenedIdGroups(
     absl::Span<const ReplicaGroup> replica_groups,
     CollectiveOpGroupMode replica_group_mode, int replica_count,
     int partition_count) {
@@ -375,7 +377,7 @@ StatusOr<std::vector<ReplicaGroup>> GetParticipatingFlattenedIdGroups(
   return flattened_replica_groups;
 }
 
-StatusOr<std::vector<GlobalDeviceId>> GetParticipatingDevices(
+absl::StatusOr<std::vector<GlobalDeviceId>> GetParticipatingDevices(
     GlobalDeviceId device_id, const DeviceAssignment& device_assignment,
     absl::Span<const ReplicaGroup> replica_groups,
     CollectiveOpGroupMode group_mode) {
@@ -479,7 +481,7 @@ StatusOr<std::vector<GlobalDeviceId>> GetParticipatingDevices(
   }
 }
 
-StatusOr<std::vector<int64_t>> GetPariticipantCountsForReplicaGroups(
+absl::StatusOr<std::vector<int64_t>> GetPariticipantCountsForReplicaGroups(
     int64_t num_replicas, int64_t num_partitions,
     absl::Span<const ReplicaGroup> replica_groups,
     CollectiveOpGroupMode group_mode) {
@@ -584,9 +586,11 @@ bool IsCollective(const HloInstruction* instruction) {
     case HloOpcode::kAllGatherStart:
     case HloOpcode::kAllGatherDone:
     case HloOpcode::kAllToAll:
+    case HloOpcode::kCollectiveBroadcast:
     case HloOpcode::kCollectivePermute:
     case HloOpcode::kCollectivePermuteStart:
     case HloOpcode::kCollectivePermuteDone:
+    case HloOpcode::kReduceScatter:
       return true;
     case HloOpcode::kFusion:
       if (instruction->IsCustomFusion()) {
@@ -597,9 +601,28 @@ bool IsCollective(const HloInstruction* instruction) {
         }
       }
       return false;
+    case HloOpcode::kAsyncStart:
+    case HloOpcode::kAsyncUpdate:
+    case HloOpcode::kAsyncDone:
+      return IsCollective(instruction->async_wrapped_instruction());
     default:
       return false;
   }
+}
+
+bool IsCollectiveWithChannelId(const HloInstruction* instruction) {
+  if (instruction->opcode() == HloOpcode::kFusion) {
+    for (const auto* inner_inst : instruction->fused_instructions()) {
+      if (IsCollectiveWithChannelId(inner_inst)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (DynCast<HloChannelInstruction>(instruction) == nullptr) {
+    return false;
+  }
+  return IsCollective(instruction) && instruction->channel_id().has_value();
 }
 
 bool IsSyncCollective(const HloInstruction* instr) {

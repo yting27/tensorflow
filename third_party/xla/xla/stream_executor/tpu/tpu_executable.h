@@ -22,6 +22,7 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "xla/hlo/ir/hlo_module.h"
@@ -46,7 +47,7 @@ class TpuExecutable : public xla::TpuExecutableInterface {
 
   ~TpuExecutable() override;
 
-  StatusOr<ExecutionOutput> ExecuteAsyncOnStream(
+  absl::StatusOr<ExecutionOutput> ExecuteAsyncOnStream(
       const ServiceExecutableRunOptions* run_options,
       std::vector<ExecutionInput> arguments,
       HloExecutionProfile* hlo_execution_profile) override;
@@ -56,8 +57,8 @@ class TpuExecutable : public xla::TpuExecutableInterface {
   // The serialization is not guaranteed to be stable over time and has no
   // compatibility guarantees (i.e. this is not a suitable long-term storage
   // format).
-  StatusOr<std::string> Serialize() const;
-  static StatusOr<std::unique_ptr<TpuExecutable>> Deserialize(
+  absl::StatusOr<std::string> Serialize() const;
+  static absl::StatusOr<std::unique_ptr<TpuExecutable>> Deserialize(
       absl::string_view serialized);
 
  private:

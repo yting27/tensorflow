@@ -156,7 +156,7 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
     auto normalized_shape = Normalize(s);
     auto layout_as_permutation = ToTransposeDimensions(s.layout());
     int64_t normalized_concat_dim =
-        FindIndex(layout_as_permutation, orig_concat_dim);
+        InversePermutation(layout_as_permutation)[orig_concat_dim];
     auto normalized_concat =
         hlo->AddInstruction(HloInstruction::CreateConcatenate(
             normalized_shape, normalized_inputs, normalized_concat_dim));
@@ -224,16 +224,35 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
         ToTransposeDimensions(s.layout());
     std::vector<int64_t> br_dimensions;
     if (!hlo->dimensions().empty()) {
-      br_dimensions = Permute(hlo->dimensions(), layout_as_permutation);
-    }
-    for (int64_t& d : br_dimensions) {
-      d = FindIndex(orig_output_layout_as_permutation, d);
+      br_dimensions.reserve(hlo->dimensions().size());
+      auto inverse_perm = InversePermutation(orig_output_layout_as_permutation);
+      for (int64_t dim :
+           ComposePermutations(hlo->dimensions(), layout_as_permutation)) {
+        br_dimensions.push_back(inverse_perm[dim]);
+      }
     }
     auto normalized_broadcast = MakeBroadcastHlo(
         normalized_input, br_dimensions, normalized_shape, &hlo->metadata());
     SetVisited(*normalized_broadcast);
     VLOG(3) << "Generated broadcast: " << normalized_broadcast->ToString();
     auto bc_to_orig = MakeBitcastHlo(normalized_broadcast, s);
+    TF_RETURN_IF_ERROR(ReplaceInstruction(hlo, bc_to_orig));
+    return OkStatus();
+  }
+
+  Status HandleIota(HloInstruction* hlo) override {
+    VLOG(3) << "Input iota: " << hlo->ToString();
+    auto s = hlo->shape();
+    auto normalized_shape = Normalize(s);
+    std::vector<int64_t> orig_output_layout_as_permutation =
+        ToTransposeDimensions(s.layout());
+    int64_t new_iota_dimension = InversePermutation(
+        orig_output_layout_as_permutation)[hlo->dimensions()[0]];
+    auto normalized_iota = hlo->AddInstruction(
+        HloInstruction::CreateIota(normalized_shape, new_iota_dimension));
+    SetVisited(*normalized_iota);
+    VLOG(3) << "Generated iota: " << normalized_iota->ToString();
+    auto bc_to_orig = MakeBitcastHlo(normalized_iota, s);
     TF_RETURN_IF_ERROR(ReplaceInstruction(hlo, bc_to_orig));
     return OkStatus();
   }
@@ -450,8 +469,9 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
         ToTransposeDimensions(hlo->shape().layout());
     std::vector<int64_t> new_dimensions;
     new_dimensions.reserve(hlo->dimensions().size());
+    auto inverse_perm = InversePermutation(layout_as_permutation);
     for (int64_t dim : hlo->dimensions()) {
-      new_dimensions.push_back(FindIndex(layout_as_permutation, dim));
+      new_dimensions.push_back(inverse_perm[dim]);
     }
     absl::c_sort(new_dimensions);
     auto normalized_reverse = hlo->AddInstruction(
@@ -481,8 +501,9 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
       new_padding.add_dimensions();
     }
 
+    auto inverse_perm = InversePermutation(layout_as_permutation);
     for (int dim = 0; dim < s.dimensions_size(); dim++) {
-      int tr_dim = static_cast<int>(FindIndex(layout_as_permutation, dim));
+      int tr_dim = static_cast<int>(inverse_perm[dim]);
       *new_padding.mutable_dimensions(tr_dim) = padded_config.dimensions(dim);
     }
 
@@ -634,7 +655,7 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
 
   // Due to Local Precondition we have, the input to all processed ops should
   // be HLO in descending layout piped through bitcast.
-  StatusOr<HloInstruction*> GetNormalizedInput(HloInstruction* hlo) {
+  absl::StatusOr<HloInstruction*> GetNormalizedInput(HloInstruction* hlo) {
     TF_RET_CHECK(hlo->opcode() == HloOpcode::kBitcast)
         << "Unexpected HLO input: " << hlo->ToString();
     auto input = hlo->mutable_operand(0);
@@ -655,7 +676,7 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
 
 }  // end namespace
 
-StatusOr<bool> LayoutNormalization::Run(
+absl::StatusOr<bool> LayoutNormalization::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
   return LayoutNormalizationVisitor{custom_call_transformer_}.RunOnModule(

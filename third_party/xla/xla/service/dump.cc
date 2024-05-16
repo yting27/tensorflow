@@ -43,6 +43,7 @@ limitations under the License.
 #include "tsl/platform/path.h"
 #include "tsl/platform/regexp.h"
 #include "tsl/platform/status.h"
+#include "tsl/profiler/lib/scoped_annotation.h"
 
 namespace xla {
 
@@ -51,7 +52,7 @@ std::string RenderGraph(absl::string_view label, const HloModule& module,
                         bool show_fusion_subcomputations) {
   HloRenderOptions hlo_render_options;
   hlo_render_options.show_fusion_subcomputations = show_fusion_subcomputations;
-  StatusOr<std::string> rendered_graph =
+  absl::StatusOr<std::string> rendered_graph =
       RenderGraph(*module.entry_computation(), label,
                   module.config().debug_options(), format, hlo_render_options);
   if (rendered_graph.ok()) {
@@ -83,7 +84,8 @@ struct CanonicalDebugOptions {
         dump_compress_protos(opts.xla_dump_compress_protos()),
         dump_hlo_metadata(!opts.xla_dump_disable_metadata()),
         dump_as_long_text(opts.xla_dump_hlo_as_long_text()),
-        dump_mlir_pretty_form(opts.xla_dump_enable_mlir_pretty_form()) {
+        dump_mlir_pretty_form(opts.xla_dump_enable_mlir_pretty_form()),
+        dump_large_constants(opts.xla_dump_large_constants()) {
     // This constructor examines the values in `opts` and turns on other flags
     // based on what we think is the user's intent.  To reduce confusion about
     // what was a user-specified value versus an extrapolated value, within this
@@ -200,6 +202,7 @@ struct CanonicalDebugOptions {
   bool dump_hlo_metadata;
   bool dump_as_long_text;
   bool dump_mlir_pretty_form;
+  bool dump_large_constants;
 };
 
 // Helper class to hold a list of functions that produces data to be written to
@@ -406,6 +409,10 @@ static bool IsTrivial(const HloComputation& computation) {
 static std::vector<std::string> DumpHloModuleImpl(
     const HloModule& module, const BufferAssignment* buffer_assn,
     string_view prefix, string_view suffix, const CanonicalDebugOptions& opts) {
+  tsl::profiler::ScopedAnnotation annotation([&] {
+    return absl::StrFormat("XlaDumpHloModule:#module=%s,program_id=%d#",
+                           module.name(), module.unique_id());
+  });
   std::string filename = FilenameFor(module, prefix, suffix);
 
   std::vector<std::optional<std::string>> file_paths;
@@ -414,7 +421,7 @@ static std::vector<std::string> DumpHloModuleImpl(
     auto print_options = opts.dump_as_long_text
                              ? HloPrintOptions::Default()
                              : HloPrintOptions::ShortParsable();
-    print_options.set_print_large_constants(false);
+    print_options.set_print_large_constants(opts.dump_large_constants);
     print_options.set_print_control_dependencies(true);
     print_options.set_print_operand_index_annotation_interval(5);
     print_options.set_print_backend_config(true);
@@ -472,7 +479,8 @@ static std::vector<std::string> DumpHloModuleImpl(
         continue;
       }
 
-      StatusOr<std::string> rendered_graph = WrapFusionExplorer(*computation);
+      absl::StatusOr<std::string> rendered_graph =
+          WrapFusionExplorer(*computation);
       if (!rendered_graph.ok()) {
         VLOG(1) << "Skipping fusion visualization"
                 << " for computation " << computation->name()
@@ -639,7 +647,7 @@ void DumpToFileInDirOrStdout(const HloModule& module, string_view file_prefix,
 void DumpProtobufToFile(const tsl::protobuf::Message& proto,
                         const DebugOptions& debug_options,
                         absl::string_view filename,
-                        absl::AnyInvocable<StatusOr<std::string>(
+                        absl::AnyInvocable<absl::StatusOr<std::string>(
                             tsl::Env*, const tsl::protobuf::Message&)>
                             text_formatter) {
   CanonicalDebugOptions opts(debug_options);
@@ -680,12 +688,13 @@ void DumpProtobufToFile(const tsl::protobuf::Message& proto,
   }
 }
 
-void DumpPerModuleProtobufToFile(
-    const HloModule& module, const tsl::protobuf::Message& proto,
-    const DebugOptions& debug_options, absl::string_view name,
-    absl::AnyInvocable<StatusOr<std::string>(tsl::Env*,
-                                             const tsl::protobuf::Message&)>
-        text_formatter) {
+void DumpPerModuleProtobufToFile(const HloModule& module,
+                                 const tsl::protobuf::Message& proto,
+                                 const DebugOptions& debug_options,
+                                 absl::string_view name,
+                                 absl::AnyInvocable<absl::StatusOr<std::string>(
+                                     tsl::Env*, const tsl::protobuf::Message&)>
+                                     text_formatter) {
   const std::string filename = FilenameFor(module, TimestampFor(module), name);
   DumpProtobufToFile(proto, debug_options, filename, std::move(text_formatter));
 }
